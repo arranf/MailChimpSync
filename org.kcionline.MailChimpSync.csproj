@@ -59,8 +59,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Jobs\Sync.cs" />
-    <Compile Include="Migrations\AddForeignKey.cs" />
-    <Compile Include="Migrations\AddTable.cs" />
+    <Compile Include="Migrations\002_AddForeignKey.cs" />
+    <Compile Include="Migrations\003_AddSecretKey.cs" />
+    <Compile Include="Migrations\001_AddTable.cs" />
     <Compile Include="Model\Extensions.cs" />
     <Compile Include="Model\MailChimpPersonAlias.cs" />
     <Compile Include="Model\MailChimpPersonAliasConfiguration.cs" />
