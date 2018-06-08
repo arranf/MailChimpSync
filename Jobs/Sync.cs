@@ -25,7 +25,11 @@ namespace org.kcionline.MailchimpSync.Jobs
 	[DisallowConcurrentExecution]
 	public class Sync : IJob
 	{
-		private int _timeout;
+        private const string MERGE_HASH_KEY = "MERGEHASH";
+        private const string PERSON_ALIAS_KEY = "PERSONALIA";
+        private const string FIRST_NAME_KEY = "FNAME";
+        private const string LAST_NAME_KEY = "LNAME";
+        private int _timeout;
 
 		private string _listId;
 
@@ -61,7 +65,7 @@ namespace org.kcionline.MailchimpSync.Jobs
 			HashSet<int> existingPersonAliasIds = SyncFromMailChimp(result);
 
             // Sync anyone missing
-			SyncToMailChimp(existingPersonAliasIds);
+            SyncToMailChimp( existingPersonAliasIds );
 		}
 
 		private HashSet<int> SyncFromMailChimp(IEnumerable<Member> listMembers)
@@ -87,7 +91,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                 }
 				MailChimpPersonAlias mailChimpPersonAlias = null;
                 // Get by unique ID if no personaliasid seen, else use personaliasid
-				mailChimpPersonAlias = ((!listMember.MergeFields.ContainsKey("PersonAliasId") || !listMember.MergeFields["PersonAliasId"].ToString().AsIntegerOrNull().HasValue) ? mailChimpPersonAliasService.GetByMailChimpUniqueId(listMember.UniqueEmailId) : mailChimpPersonAliasService.GetByPersonAliasId(listMember.MergeFields["PersonAliasId"].ToString().AsInteger()));
+				mailChimpPersonAlias = ((!listMember.MergeFields.ContainsKey( PERSON_ALIAS_KEY ) || !listMember.MergeFields[PERSON_ALIAS_KEY].ToString().AsIntegerOrNull().HasValue) ? mailChimpPersonAliasService.GetByMailChimpUniqueId(listMember.UniqueEmailId) : mailChimpPersonAliasService.GetByPersonAliasId(listMember.MergeFields[PERSON_ALIAS_KEY].ToString().AsInteger()));
 
                 // TODO Some kind of check they're in the group (?)
 
@@ -105,16 +109,29 @@ namespace org.kcionline.MailchimpSync.Jobs
                     if (person.Email != mailChimpPersonAlias.Email)
                     {
                         RemoveFromMailChimp( mailChimpPersonAlias ).RunSynchronously();
-                        AddOrUpdatePerson( person, rockContext );
+                        try
+                        {
+                            AddOrUpdatePerson( person, rockContext );
+                        } catch (Exception e)
+                        {
+                            // TODO
+                        }
                     }
                     else
                     {
                         // Check to see if person has been updated
                         string mergeFieldsHash = HashDictionary(listMember.MergeFields);
-					    if (!listMember.MergeFields.ContainsKey("MergeHash") || listMember.MergeFields["MergeHash"].ToString() != mergeFieldsHash)
+					    if (!listMember.MergeFields.ContainsKey( MERGE_HASH_KEY ) || listMember.MergeFields[MERGE_HASH_KEY].ToString() != mergeFieldsHash)
 					    {
-						    AddOrUpdatePerson(mailChimpPersonAlias.PersonAlias.Person, rockContext);
-					    }
+                            try
+                            {
+                                AddOrUpdatePerson( mailChimpPersonAlias.PersonAlias.Person, rockContext );
+                            }
+                            catch ( Exception e )
+                            {
+                                // TODO
+                            }
+                        }
                     }
 
 				}
@@ -130,8 +147,8 @@ namespace org.kcionline.MailchimpSync.Jobs
             person = personService.GetByEmail( listMember.EmailAddress ).FirstOrDefault();
             if ( person == null )
             {
-                string firstName = listMember.MergeFields["FNAME"].ToString();
-                string lastName = listMember.MergeFields["LNAME"].ToString();
+                string firstName = listMember.MergeFields[FIRST_NAME_KEY].ToString();
+                string lastName = listMember.MergeFields[LAST_NAME_KEY].ToString();
                 person = new Person();
                 person.IsSystem = false;
                 person.RecordTypeValueId = recordTypeId;
@@ -155,14 +172,26 @@ namespace org.kcionline.MailchimpSync.Jobs
             var validGroupMembers = new GroupService( rockContext )
                             .Queryable( "Members" )
                             .AsNoTracking()
-                            .Where( g => g.TypeId == _groupTypeId )
+                            .Where( g => g.GroupTypeId == _groupTypeId )
                             .SelectMany( g => g.Members )
                             .Select( gm => gm.Person )
-                            .Where( p => !p.IsDeceased && p.RecordStatusValueId == activeRecordStatusValueId && p.IsEmailActive && p.Email != null && p.Email != String.Empty && p.EmailPreference == EmailPreference.EmailAllowed );
+                            .Where( p => !p.IsDeceased && p.RecordStatusValueId == activeRecordStatusValueId && p.IsEmailActive && p.Email != null && p.Email != String.Empty && p.EmailPreference == EmailPreference.EmailAllowed )
+                            .ToList();
 
-            var groupMembersNotOnList = validGroupMembers.Where( p => !p.PrimaryAliasId.HasValue || !existingPersonAliasIds.Contains( p.PrimaryAliasId.Value ) );
+            var peopleNotOnList = validGroupMembers.Where( p => p.PrimaryAliasId.HasValue && !existingPersonAliasIds.Contains( p.PrimaryAliasId.Value ) );
 			MailChimpPersonAliasService mailChimpPersonAliasService = new MailChimpPersonAliasService(rockContext);
-            groupMembersNotOnList.Select( p => AddOrUpdatePerson( p, rockContext ) );
+            foreach (var person in peopleNotOnList)
+            {
+                // TODO Make a batch job
+                try
+                {
+                    AddOrUpdatePerson( person, rockContext );
+                }
+                catch ( Exception e )
+                {
+                    // TODO
+                }
+            }
 		}
 
 		private RockContext GenerateRockContext()
@@ -201,29 +230,34 @@ namespace org.kcionline.MailchimpSync.Jobs
 
 		private MailChimpPersonAlias AddOrUpdatePerson(Person person, RockContext rockContext)
 		{
-			MailChimpPersonAliasService mailChimpPersonAliasService = new MailChimpPersonAliasService(rockContext);
-			Member member = MakeMailChimpMember(person);
-			member = AddOrUpdateMailChimpMember(member).Result;
-			if (person.PrimaryAliasId.HasValue)
-			{
-				MailChimpPersonAlias mailChimpPersonAlias = mailChimpPersonAliasService.GetByPersonAliasId(person.PrimaryAliasId.Value);
-				if (mailChimpPersonAlias == null)
-				{
-					mailChimpPersonAlias = new MailChimpPersonAlias();
-					mailChimpPersonAlias.PersonAliasId = person.PrimaryAliasId.Value;
-				}
-				mailChimpPersonAlias.Email = member.EmailAddress;
-				mailChimpPersonAlias.MailChimpUniqueId = member.UniqueEmailId;
-				mailChimpPersonAlias.LastUpdated = RockDateTime.Now;
-                if (mailChimpPersonAlias == null)
+            try
+            {
+                MailChimpPersonAliasService mailChimpPersonAliasService = new MailChimpPersonAliasService( rockContext );
+                Member member = MakeMailChimpMember( person );
+                member = AddOrUpdateMailChimpMember( member ).Result;
+                if ( person.PrimaryAliasId.HasValue )
                 {
-				    mailChimpPersonAliasService.Add(mailChimpPersonAlias);
+                    MailChimpPersonAlias mailChimpPersonAlias = mailChimpPersonAliasService.GetByPersonAliasId( person.PrimaryAliasId.Value );
+                    if ( mailChimpPersonAlias == null )
+                    {
+                        mailChimpPersonAlias = new MailChimpPersonAlias();
+                        mailChimpPersonAlias.PersonAliasId = person.PrimaryAliasId.Value;
+                    }
+                    mailChimpPersonAlias.Email = member.EmailAddress;
+                    mailChimpPersonAlias.MailChimpUniqueId = member.UniqueEmailId;
+                    mailChimpPersonAlias.LastUpdated = RockDateTime.Now;
+                    if ( mailChimpPersonAlias.Id == 0 )
+                    {
+                        mailChimpPersonAliasService.Add( mailChimpPersonAlias );
+                    }
+                    rockContext.SaveChanges();
+                    return mailChimpPersonAlias;
                 }
-				rockContext.SaveChanges();
-                return mailChimpPersonAlias;
-			}
-            throw new Exception( "No person primary alias found" );
-
+                throw new Exception( "No person primary alias found" );
+            } catch (Exception e)
+            {
+                throw new Exception( "Error adding or updating a person", e );
+            }
 		}
 
         private async Task RemoveFromMailChimp(MailChimpPersonAlias mailChimpPersonAlias)
@@ -245,17 +279,18 @@ namespace org.kcionline.MailchimpSync.Jobs
 		private static Dictionary<string, object> CreateMergeFields(Person person)
 		{
 			Dictionary<string, object> mergeFields = new Dictionary<string, object>();
-            mergeFields.Add( "FNAME", person.NickName );
-            mergeFields.Add( "LNAME", person.LastName );
-			mergeFields.Add("PersonAliasId", person.PrimaryAliasId);
-			mergeFields.Add("Age", person.Age);
-			mergeFields.Add("DOB", person.BirthDate);
-			Rock.Model.Location location = person.GetFamily(null)?.GroupLocations?.FirstOrDefault((GroupLocation a) => a.IsMailingLocation)?.Location;
-			mergeFields.Add("Address", location?.FormattedAddress);
+            // TODO MAKE THESE CONSISTENT
+            mergeFields.Add( FIRST_NAME_KEY, person.NickName );
+            mergeFields.Add( LAST_NAME_KEY, person.LastName );
+			mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId);
+			mergeFields.Add("AGE", person.Age);
+			mergeFields.Add("DOB", person.BirthDate.HasValue ? person.BirthDate.Value.ToString("o") : String.Empty);
+			String address = person.GetFamily(null)?.GroupLocations?.FirstOrDefault((GroupLocation a) => a.IsMailingLocation)?.Location?.FormattedAddress;
+			mergeFields.Add( "ADDRESS", address ?? string.Empty);
 
-			mergeFields.Add("Groups", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).DistinctBy( a => a.GroupId ) );
-			mergeFields.Add("LineMembers", string.Empty);
-			mergeFields.Add("MergeHash", HashDictionary(mergeFields));
+			mergeFields.Add("GROUPS", String.Join(",", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).Select( a => a.GroupId ).OrderBy( b => b ).Select( c => c.ToString() ).ToArray() ));
+			mergeFields.Add("LINE", string.Empty);
+			mergeFields.Add( MERGE_HASH_KEY, HashDictionary(mergeFields));
 			return mergeFields;
 		}
 
@@ -271,11 +306,18 @@ namespace org.kcionline.MailchimpSync.Jobs
 			StringBuilder stringBuilder = new StringBuilder();
 			foreach (KeyValuePair<string, object> item in sortedDictionary)
 			{
-				if (!(item.Key == "MergeHash"))
+				if (!(item.Key == MERGE_HASH_KEY))
 				{
 					stringBuilder.Append(item.Key);
 					stringBuilder.Append("+");
-					stringBuilder.Append(item.Value.ToStringSafe());
+                    if ( item.Value is DateTime )
+                    {
+                        stringBuilder.Append( ((DateTime) item.Value).ToString("o") );
+                    }
+                    else
+                    {
+					    stringBuilder.Append(item.Value.ToString());
+                    }
 					stringBuilder.Append("|");
 				}
 			}
