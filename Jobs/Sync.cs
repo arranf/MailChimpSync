@@ -140,15 +140,15 @@ namespace org.kcionline.MailchimpSync.Jobs
 
 		private int ValidateParameters(string apiKey, Guid? groupTypeGuid)
 		{
-			if (apiKey.IsNotNullOrWhitespace())
+			if (apiKey.IsNullOrWhiteSpace())
 			{
 				throw new Exception("No API key is set. Unable to sync.");
 			}
-			if (_listId.IsNotNullOrWhitespace())
+			if (_listId.IsNullOrWhiteSpace())
 			{
 				throw new Exception("No MailChimp List ID set. Unable to sync.");
 			}
-			if (groupTypeGuid.HasValue)
+			if (!groupTypeGuid.HasValue)
 			{
 				throw new Exception("No Group Type set. Unable to sync.");
 			}
