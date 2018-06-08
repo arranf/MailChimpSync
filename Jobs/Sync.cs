@@ -355,6 +355,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             {
                 EmailAddress = person.Email,
                 StatusIfNew = Status.Subscribed,
+                Status = Status.Subscribed,
                 MergeFields = mergeFields
             };
         }
