@@ -121,7 +121,8 @@ namespace org.kcionline.MailchimpSync.Jobs
                     {
                         // Check to see if person has been updated
                         string mergeFieldsHash = HashDictionary(listMember.MergeFields);
-					    if (!listMember.MergeFields.ContainsKey( MERGE_HASH_KEY ) || listMember.MergeFields[MERGE_HASH_KEY].ToString() != mergeFieldsHash)
+                        var comparison = CreateMergeFields( person );
+                        if (!listMember.MergeFields.ContainsKey( MERGE_HASH_KEY ) || listMember.MergeFields[MERGE_HASH_KEY].ToString() != mergeFieldsHash)
 					    {
                             try
                             {
@@ -280,13 +281,17 @@ namespace org.kcionline.MailchimpSync.Jobs
 		{
 			Dictionary<string, object> mergeFields = new Dictionary<string, object>();
             // TODO MAKE THESE CONSISTENT
-            mergeFields.Add( FIRST_NAME_KEY, person.NickName );
-            mergeFields.Add( LAST_NAME_KEY, person.LastName );
-			mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId);
-			mergeFields.Add("AGE", person.Age);
-			mergeFields.Add("DOB", person.BirthDate.HasValue ? person.BirthDate.Value.ToString("o") : String.Empty);
-			String address = person.GetFamily(null)?.GroupLocations?.FirstOrDefault((GroupLocation a) => a.IsMailingLocation)?.Location?.FormattedAddress;
-			mergeFields.Add( "ADDRESS", address ?? string.Empty);
+            mergeFields.Add( FIRST_NAME_KEY, person.NickName.ToStringSafe() );
+            mergeFields.Add( LAST_NAME_KEY, person.LastName.ToStringSafe() );
+			mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId.ToStringSafe());
+			mergeFields.Add("AGE", person.Age.ToStringSafe());
+			mergeFields.Add("DOB", person.BirthDate.HasValue ? person.BirthDate.Value.ToString("yyyy-MM-dd") : String.Empty);
+            var address = person.GetFamily( null )?.GroupLocations?.FirstOrDefault( ( GroupLocation a ) => a.IsMailingLocation )?.Location;
+			mergeFields.Add( "STREET1", address?.Street1.ToStringSafe());
+            mergeFields.Add( "STREET2", address?.Street2.ToStringSafe() );
+            mergeFields.Add( "CITY", address?.City.ToStringSafe() );
+            mergeFields.Add( "POSTALCODE", address?.PostalCode.ToStringSafe() );
+            mergeFields.Add( "COUNTRY", address?.Country.ToStringSafe() );
 
 			mergeFields.Add("GROUPS", String.Join(",", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).Select( a => a.GroupId ).OrderBy( b => b ).Select( c => c.ToString() ).ToArray() ));
 			mergeFields.Add("LINE", string.Empty);
@@ -310,14 +315,7 @@ namespace org.kcionline.MailchimpSync.Jobs
 				{
 					stringBuilder.Append(item.Key);
 					stringBuilder.Append("+");
-                    if ( item.Value is DateTime )
-                    {
-                        stringBuilder.Append( ((DateTime) item.Value).ToString("o") );
-                    }
-                    else
-                    {
-					    stringBuilder.Append(item.Value.ToString());
-                    }
+					stringBuilder.Append(item.Value.ToStringSafe());
 					stringBuilder.Append("|");
 				}
 			}
