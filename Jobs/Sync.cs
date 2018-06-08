@@ -26,10 +26,11 @@ namespace org.kcionline.MailchimpSync.Jobs
     public class Sync : IJob
     {
         private const string MERGE_HASH_KEY = "MERGEHASH";
-        private const string PERSON_ALIAS_KEY = "PERSONALIA";
+        public const string PERSON_ALIAS_KEY = "PERSONALIA";
         private const string FIRST_NAME_KEY = "FNAME";
         private const string LAST_NAME_KEY = "LNAME";
-
+        private const string AGE_KEY = "AGE";
+        private const string DATE_OF_BIRTH_KEY = "DOB";
         private int _syncCount = 0;
         private int _timeout;
         private string _listId;
@@ -52,10 +53,21 @@ namespace org.kcionline.MailchimpSync.Jobs
 
             // TODO Groups Sync and Segments Sync
 
-            IEnumerable<Member> result;
+            IEnumerable<ListSegment> segments;
             try
             {
-                result = GetListMembers().Result;
+                segments = GetSegments().Result;
+            }
+            catch (Exception e)
+            {
+                throw new Exception( "Unable to fetch Mailchimp segments", e );
+            }
+
+
+            IEnumerable<Member> mailChimpMembers;
+            try
+            {
+                mailChimpMembers = GetListMembers().Result;
             }
             catch ( Exception innerException )
             {
@@ -63,16 +75,69 @@ namespace org.kcionline.MailchimpSync.Jobs
             }
 
             // Find who's on the list and update anyone if their mergefields would be different
-            HashSet<int> existingPersonAliasIds = SyncFromMailChimp( result );
+            HashSet<int> existingPersonAliasIds = SyncFromMailChimp( mailChimpMembers );
+
+            // Get all people who should be synced
+            var rockContext = GenerateRockContext();
+            var groups = new GroupService( rockContext )
+                                .Queryable( "Members.Select(l1 => l1.Person)" )
+                                .AsNoTracking()
+                                .Where( g => g.GroupTypeId == _groupTypeId );
+
+            var segmentNamesToId = segments.Select( s => new { s.Name, s.Id } ).ToDictionary( a => a.Name, s => s.Id );
+            var groupNamesByID = groups.Select( g => new { g.Name, g.Id } ).ToDictionary(a => a.Id, g => g.Name);
+
+
+            int activeRecordStatusValueId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_RECORD_STATUS_ACTIVE.AsGuid(), null ).Id;
+            var peopleByGroup = groups
+                .SelectMany( g => g.Members )
+                .Where( p => !p.Person.IsDeceased && p.Person.RecordStatusValueId == activeRecordStatusValueId && p.Person.IsEmailActive && p.Person.Email != null && p.Person.Email != String.Empty && p.Person.EmailPreference == EmailPreference.EmailAllowed )
+                .GroupBy( gm => gm.GroupId, gm => gm.Person );
 
             // Sync anyone missing
-            SyncToMailChimp( existingPersonAliasIds );
+            SyncToMailChimp( existingPersonAliasIds, peopleByGroup );
+
+            // Ensure segments are updated
+            SyncSegments( groupNamesByID, peopleByGroup, segmentNamesToId ).Wait();
 
             context.Result = string.Format( "Synced a total of {0} people", _syncCount );
 
             if ( _exceptions.Any() )
             {
                 throw new AggregateException( "One or more person syncs failed ", _exceptions );
+            }
+        }
+
+        private async Task SyncSegments( Dictionary<int, string> groupNamesByID, IQueryable<IGrouping<int, Person>> peopleByGroup, Dictionary<string, int> segments )
+        {
+            foreach (var keyPair in groupNamesByID)
+            {
+                String groupName = keyPair.Value;
+                IEnumerable<Person> people = peopleByGroup.Where( g => g.Key == keyPair.Key ).SelectMany( a => a.Select( b => b ) );
+
+
+                // update
+                if ( segments.Keys.Contains(groupName))
+                {
+                    try
+                    {
+
+                        await UpdateSegment( groupName, segments[groupName], people );
+                    } catch (Exception e)
+                    {
+                        throw new Exception( "Error updating segment", e );
+                    }
+                }
+                else //create
+                {
+                    try
+                    {
+                        await AddSegment( groupName, people );
+                    } catch (Exception e)
+                    {
+                        throw new Exception( "Error adding segment " + groupName, e );
+                    }
+                }
             }
         }
 
@@ -120,7 +185,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                     var person = mailChimpPersonAlias.PersonAlias.Person;
                     if ( person.Email != mailChimpPersonAlias.Email )
                     {
-                        RemoveFromMailChimp( mailChimpPersonAlias ).RunSynchronously();
+                        RemoveFromMailChimp( mailChimpPersonAlias ).Wait();
                         try
                         {
                             AddOrUpdatePerson( person, rockContext );
@@ -181,17 +246,11 @@ namespace org.kcionline.MailchimpSync.Jobs
             return mailChimpPersonAlias;
         }
 
-        private void SyncToMailChimp( HashSet<int> existingPersonAliasIds )
+        private void SyncToMailChimp( HashSet<int> existingPersonAliasIds, IQueryable<IGrouping<int, Person>> peopleGroupedByGroupId  )
         {
             RockContext rockContext = GenerateRockContext();
-            int activeRecordStatusValueId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_RECORD_STATUS_ACTIVE.AsGuid(), null ).Id;
-            var validGroupMembers = new GroupService( rockContext )
-                            .Queryable( "Members" )
-                            .AsNoTracking()
-                            .Where( g => g.GroupTypeId == _groupTypeId )
-                            .SelectMany( g => g.Members )
-                            .Select( gm => gm.Person )
-                            .Where( p => !p.IsDeceased && p.RecordStatusValueId == activeRecordStatusValueId && p.IsEmailActive && p.Email != null && p.Email != String.Empty && p.EmailPreference == EmailPreference.EmailAllowed )
+            var validGroupMembers = peopleGroupedByGroupId
+                            .SelectMany(g => g.Select(p => p))
                             .ToList();
 
             var peopleNotOnList = validGroupMembers.Where( p => p.PrimaryAliasId.HasValue && !existingPersonAliasIds.Contains( p.PrimaryAliasId.Value ) );
@@ -254,6 +313,12 @@ namespace org.kcionline.MailchimpSync.Jobs
                 if ( person.PrimaryAliasId.HasValue )
                 {
                     MailChimpPersonAlias mailChimpPersonAlias = mailChimpPersonAliasService.GetByPersonAliasId( person.PrimaryAliasId.Value );
+                    if ( mailChimpPersonAlias != null && mailChimpPersonAlias.LastUpdated >= RockDateTime.Now.AddMinutes(-5))
+                    {
+                        // Skip sync, synced recently
+                        return mailChimpPersonAlias;
+                    }
+
                     if ( mailChimpPersonAlias == null )
                     {
                         mailChimpPersonAlias = new MailChimpPersonAlias();
@@ -300,8 +365,8 @@ namespace org.kcionline.MailchimpSync.Jobs
             mergeFields.Add( FIRST_NAME_KEY, person.NickName.ToStringSafe() );
             mergeFields.Add( LAST_NAME_KEY, person.LastName.ToStringSafe() );
             mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId.ToStringSafe() );
-            mergeFields.Add( "AGE", person.Age.ToStringSafe() );
-            mergeFields.Add( "DOB", person.BirthDate.HasValue ? person.BirthDate.Value.ToString( "yyyy-MM-dd" ) : String.Empty );
+            mergeFields.Add( AGE_KEY, person.Age.ToStringSafe() );
+            mergeFields.Add( DATE_OF_BIRTH_KEY, person.BirthDate.HasValue ? person.BirthDate.Value.ToString( "yyyy-MM-dd" ) : String.Empty );
             var address = person.GetFamily( null )?.GroupLocations?.FirstOrDefault( ( GroupLocation a ) => a.IsMailingLocation )?.Location;
             mergeFields.Add( "STREET1", address?.Street1.ToStringSafe() );
             mergeFields.Add( "STREET2", address?.Street2.ToStringSafe() );
@@ -309,8 +374,9 @@ namespace org.kcionline.MailchimpSync.Jobs
             mergeFields.Add( "POSTALCODE", address?.PostalCode.ToStringSafe() );
             mergeFields.Add( "COUNTRY", address?.Country.ToStringSafe() );
 
-            mergeFields.Add( "GROUPS", String.Join( ",", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).Select( a => a.GroupId ).OrderBy( b => b ).Select( c => c.ToString() ).ToArray() ) );
-            mergeFields.Add( "LINE", string.Empty );
+            //mergeFields.Add( "GROUPS", String.Join( ",", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).Select( a => a.GroupId ).OrderBy( b => b ).Select( c => c.ToString() ).ToArray() ) );
+            // TODO
+            //mergeFields.Add( "LINE", string.Empty );
             mergeFields.Add( MERGE_HASH_KEY, HashDictionary( mergeFields ) );
             return mergeFields;
         }
@@ -369,6 +435,27 @@ namespace org.kcionline.MailchimpSync.Jobs
                     workflow.SaveAttributeValues();
                 }
             }
+        }
+
+        private async Task<IEnumerable<ListSegment>> GetSegments()
+        {
+            return await _manager.ListSegments.GetAllAsync( _listId, null ).ConfigureAwait( false );
+        }
+
+        private async Task<ListSegment> AddSegment(String groupName, IEnumerable<Person> people)
+        {
+            var segment = new MailChimp.Net.Core.Segment();
+            segment.Name = groupName;
+            segment.EmailAddresses = people.Select( p => p.Email );
+            return await _manager.ListSegments.AddAsync( _listId, segment );
+        }
+
+        private async Task<ListSegment> UpdateSegment( String groupName, int segmentId, IEnumerable<Person> people )
+        {
+            var segment = new MailChimp.Net.Core.Segment();
+            segment.Name = groupName;
+            segment.EmailAddresses = people.Select( p => p.Email );
+            return await _manager.ListSegments.UpdateAsync( _listId, segmentId.ToString(), segment );
         }
     }
 }
