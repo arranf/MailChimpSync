@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{81BC25C0-3A92-41FB-951A-1B6A97A51C7E}</ProjectGuid>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <AssemblyName>org.kcionline.MailchimpSync</AssemblyName>
+    <TargetFrameworkIdentifier>.NETFramework</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.DataAnnotations">
+      <HintPath>C:\WINDOWS\Microsoft.Net\assembly\GAC_MSIL\System.ComponentModel.DataAnnotations\v4.0_4.0.0.0__31bf3856ad364e35\System.ComponentModel.DataAnnotations.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.Serialization">
+      <HintPath>C:\WINDOWS\Microsoft.NET\assembly\GAC_MSIL\System.Runtime.Serialization\v4.0_4.0.0.0__b77a5c561934e089\System.Runtime.Serialization.dll</HintPath>
+    </Reference>
+    <Reference Include="Rock">
+      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\Rock.dll</HintPath>
+    </Reference>
+    <Reference Include="EntityFramework">
+      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\EntityFramework.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Core">
+      <HintPath>C:\WINDOWS\Microsoft.Net\assembly\GAC_MSIL\System.Core\v4.0_4.0.0.0__b77a5c561934e089\System.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Quartz">
+      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\Quartz.dll</HintPath>
+    </Reference>
+    <Reference Include="MailChimp.Net">
+      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\MailChimp.Net.dll</HintPath>
+    </Reference>
+    <Reference Include="System">
+      <HintPath>C:\WINDOWS\Microsoft.Net\assembly\GAC_MSIL\System\v4.0_4.0.0.0__b77a5c561934e089\System.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="org.kcionline.MailchimpSync.Jobs\Sync.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Migrations\AddForeignKey.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Migrations\AddTable.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Model\Extensions.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAlias.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAliasConfiguration.cs" />
+    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAliasService.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
