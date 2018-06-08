@@ -29,13 +29,13 @@ namespace org.kcionline.MailchimpSync.Jobs
         private const string PERSON_ALIAS_KEY = "PERSONALIA";
         private const string FIRST_NAME_KEY = "FNAME";
         private const string LAST_NAME_KEY = "LNAME";
+
+        private int _syncCount = 0;
         private int _timeout;
-
 		private string _listId;
-
 		private IMailChimpManager _manager;
-
         private int _groupTypeId;
+        private List<Exception> _exceptions;
 
 
         public void Execute(IJobExecutionContext context)
@@ -66,7 +66,14 @@ namespace org.kcionline.MailchimpSync.Jobs
 
             // Sync anyone missing
             SyncToMailChimp( existingPersonAliasIds );
-		}
+
+            context.Result = string.Format( "Synced a total of {0} people", _syncCount);
+
+            if ( _exceptions.Any() )
+            {
+                throw new AggregateException( "One or more person syncs failed ", _exceptions );
+            }
+        }
 
 		private HashSet<int> SyncFromMailChimp(IEnumerable<Member> listMembers)
 		{
@@ -114,14 +121,14 @@ namespace org.kcionline.MailchimpSync.Jobs
                             AddOrUpdatePerson( person, rockContext );
                         } catch (Exception e)
                         {
-                            // TODO
+                            _exceptions.Add( new Exception( "Failed to add or update person", e ) );
                         }
                     }
                     else
                     {
                         // Check to see if person has been updated
-                        string mergeFieldsHash = HashDictionary(listMember.MergeFields);
-                        var comparison = CreateMergeFields( person );
+                        var mergeFields = CreateMergeFields( person );
+                        string mergeFieldsHash = HashDictionary( mergeFields );
                         if (!listMember.MergeFields.ContainsKey( MERGE_HASH_KEY ) || listMember.MergeFields[MERGE_HASH_KEY].ToString() != mergeFieldsHash)
 					    {
                             try
@@ -130,7 +137,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                             }
                             catch ( Exception e )
                             {
-                                // TODO
+                                _exceptions.Add( new Exception( "Failed to add or update person", e ) );
                             }
                         }
                     }
@@ -190,7 +197,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                 }
                 catch ( Exception e )
                 {
-                    // TODO
+                    _exceptions.Add( new Exception( "Failed to add or update person", e ) );
                 }
             }
 		}
@@ -252,6 +259,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                         mailChimpPersonAliasService.Add( mailChimpPersonAlias );
                     }
                     rockContext.SaveChanges();
+                    _syncCount++;
                     return mailChimpPersonAlias;
                 }
                 throw new Exception( "No person primary alias found" );
@@ -280,7 +288,6 @@ namespace org.kcionline.MailchimpSync.Jobs
 		private static Dictionary<string, object> CreateMergeFields(Person person)
 		{
 			Dictionary<string, object> mergeFields = new Dictionary<string, object>();
-            // TODO MAKE THESE CONSISTENT
             mergeFields.Add( FIRST_NAME_KEY, person.NickName.ToStringSafe() );
             mergeFields.Add( LAST_NAME_KEY, person.LastName.ToStringSafe() );
 			mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId.ToStringSafe());
