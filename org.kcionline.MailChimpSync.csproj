@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <ProjectGuid>{81BC25C0-3A92-41FB-951A-1B6A97A51C7E}</ProjectGuid>
@@ -7,9 +7,10 @@
     <OutputType>Library</OutputType>
     <AssemblyName>org.kcionline.MailchimpSync</AssemblyName>
     <TargetFrameworkIdentifier>.NETFramework</TargetFrameworkIdentifier>
-    <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
     <WarningLevel>4</WarningLevel>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -27,14 +28,21 @@
     <Optimize>true</Optimize>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="MailChimp.Net.V3, Version=2.1.0.0, Culture=neutral, PublicKeyToken=37d26d538413c581, processorArchitecture=MSIL">
+      <HintPath>..\Rock\packages\MailChimp.Net.V3.2.1.0.0\lib\net45\MailChimp.Net.V3.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json, Version=9.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\Rock\packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="System.ComponentModel.DataAnnotations">
       <HintPath>C:\WINDOWS\Microsoft.Net\assembly\GAC_MSIL\System.ComponentModel.DataAnnotations\v4.0_4.0.0.0__31bf3856ad364e35\System.ComponentModel.DataAnnotations.dll</HintPath>
     </Reference>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Net.Http.Formatting, Version=5.2.3.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <HintPath>..\Rock\packages\Microsoft.AspNet.WebApi.Client.5.2.3\lib\net45\System.Net.Http.Formatting.dll</HintPath>
+    </Reference>
     <Reference Include="System.Runtime.Serialization">
       <HintPath>C:\WINDOWS\Microsoft.NET\assembly\GAC_MSIL\System.Runtime.Serialization\v4.0_4.0.0.0__b77a5c561934e089\System.Runtime.Serialization.dll</HintPath>
-    </Reference>
-    <Reference Include="Rock">
-      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\Rock.dll</HintPath>
     </Reference>
     <Reference Include="EntityFramework">
       <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\EntityFramework.dll</HintPath>
@@ -45,22 +53,33 @@
     <Reference Include="Quartz">
       <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\Quartz.dll</HintPath>
     </Reference>
-    <Reference Include="MailChimp.Net">
-      <HintPath>C:\Users\Arran\Downloads\ILSpy_binaries_3.1.0.3652\MailChimp.Net.dll</HintPath>
-    </Reference>
     <Reference Include="System">
       <HintPath>C:\WINDOWS\Microsoft.Net\assembly\GAC_MSIL\System\v4.0_4.0.0.0__b77a5c561934e089\System.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="org.kcionline.MailchimpSync.Jobs\Sync.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Migrations\AddForeignKey.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Migrations\AddTable.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Model\Extensions.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAlias.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAliasConfiguration.cs" />
-    <Compile Include="org.kcionline.MailchimpSync.Model\MailChimpPersonAliasService.cs" />
+    <Compile Include="Jobs\Sync.cs" />
+    <Compile Include="Migrations\AddForeignKey.cs" />
+    <Compile Include="Migrations\AddTable.cs" />
+    <Compile Include="Model\Extensions.cs" />
+    <Compile Include="Model\MailChimpPersonAlias.cs" />
+    <Compile Include="Model\MailChimpPersonAliasConfiguration.cs" />
+    <Compile Include="Model\MailChimpPersonAliasService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Rock\DotLiquid\DotLiquid.csproj">
+      <Project>{00edcb8d-ef33-459c-ad62-02876bd24dff}</Project>
+      <Name>DotLiquid</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Rock\Rock\Rock.csproj">
+      <Project>{185a31d7-3037-4dae-8797-0459849a84bd}</Project>
+      <Name>Rock</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="app.config" />
+    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
