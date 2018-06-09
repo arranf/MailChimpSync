@@ -49,7 +49,10 @@ public class MailChimp : IHttpHandler
             {
                 var mailChimpAliasService = new MailChimpPersonAliasService( rockContext );
                 var mailChimpAliasPerson = mailChimpAliasService.GetByPersonAliasId(personAliasId);
-                mailChimpAliasService.Delete( mailChimpAliasPerson );
+                if (mailChimpAliasPerson != null)
+                {
+                    mailChimpAliasService.Delete( mailChimpAliasPerson );
+                }
 
                 var syncEntityType = EntityTypeCache.Read( "org.kcionline.MailchimpSync.Model.MailChimpPersonAlias", false );
                 if ( syncEntityType != null )
@@ -67,12 +70,14 @@ public class MailChimp : IHttpHandler
                     var personId = new PersonAliasService( rockContext ).Get( personAliasId ).PersonId;
                     var groupMemberService = new GroupMemberService( rockContext );
                     var groupMembers = groupMemberService.GetByPersonId( personId ).Where( gm => groupTypeGuids.Contains( gm.Group.GroupType.Guid ) );
-
-                    groupMemberService.DeleteRange( groupMembers );
+                    if (groupMembers != null && groupMembers.Count() > 0)
+                    {
+                        groupMemberService.DeleteRange( groupMembers );
+                    }
                     rockContext.SaveChanges();
                 } else
                 {
-                       
+
                     throw new Exception( "No sync job set" );
                 }
 
