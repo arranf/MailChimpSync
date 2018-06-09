@@ -22,6 +22,10 @@ namespace org.kcionline.MailchimpSync.Jobs
     [GroupTypeField( "Group Type", "Groups of this group type will be synced to your MailChimp list", true, "", "", 0, null, "" )]
     [TextField( "List Id", "The MailChimp list to sync to", true, "", "", 0, null, false, null )]
     [IntegerField( "Timeout", "The number of seconds to use before the database connection times out", true, 720, "", 0, null )]
+
+    [WorkflowTypeField( "New Person Workflow", "The workflow type to launch when a new person is added.", key: "NewPersonWorkflow", order: 0 )]
+    [DefinedValueField(Rock.SystemGuid.DefinedType.PERSON_CONNECTION_STATUS, "New Person Connection Status", "The connection status for new people", true, key: "NewPersonConnectionStatus", defaultValue: Rock.SystemGuid.DefinedValue.PERSON_CONNECTION_STATUS_WEB_PROSPECT)]
+
     [DisallowConcurrentExecution]
     public class Sync : IJob
     {
@@ -37,6 +41,7 @@ namespace org.kcionline.MailchimpSync.Jobs
         private IMailChimpManager _manager;
         private int _groupTypeId;
         private Guid? _workflowTypeGuid;
+        private Guid _newPersonConnectionStatusGuid;
         private List<Exception> _exceptions = new List<Exception>();
 
 
@@ -50,20 +55,20 @@ namespace org.kcionline.MailchimpSync.Jobs
             _manager = new MailChimpManager( apiKey );
             _groupTypeId = ValidateParameters( apiKey, groupTypeGuid );
             _workflowTypeGuid = jobDataMap.GetString( "NewPersonWorkflow" ).AsGuidOrNull();
+            _newPersonConnectionStatusGuid = jobDataMap.GetString( "NewPersonConnectionStatus" ).AsGuid();
 
-            // TODO Groups Sync and Segments Sync
-
+            // Get segments
             IEnumerable<ListSegment> segments;
             try
             {
                 segments = GetSegments().Result;
             }
-            catch (Exception e)
+            catch ( Exception e )
             {
                 throw new Exception( "Unable to fetch Mailchimp segments", e );
             }
 
-
+            // Get list members
             IEnumerable<Member> mailChimpMembers;
             try
             {
@@ -84,8 +89,8 @@ namespace org.kcionline.MailchimpSync.Jobs
                                 .AsNoTracking()
                                 .Where( g => g.GroupTypeId == _groupTypeId );
 
-            var segmentNamesToId = segments.Select( s => new { s.Name, s.Id } ).ToDictionary( a => a.Name, s => s.Id );
-            var groupNamesByID = groups.Select( g => new { g.Name, g.Id } ).ToDictionary(a => a.Id, g => g.Name);
+            var segmentIdsByName = segments.Select( s => new { s.Name, s.Id } ).ToDictionary( a => a.Name, s => s.Id );
+            var groupNamesByID = groups.Select( g => new { g.Name, g.Id } ).ToDictionary( a => a.Id, g => g.Name );
 
 
             int activeRecordStatusValueId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_RECORD_STATUS_ACTIVE.AsGuid(), null ).Id;
@@ -98,7 +103,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             SyncToMailChimp( existingPersonAliasIds, peopleByGroup );
 
             // Ensure segments are updated
-            SyncSegments( groupNamesByID, peopleByGroup, segmentNamesToId ).Wait();
+            SyncSegments( groupNamesByID, peopleByGroup, segmentIdsByName ).Wait();
 
             context.Result = string.Format( "Synced a total of {0} people", _syncCount );
 
@@ -110,20 +115,21 @@ namespace org.kcionline.MailchimpSync.Jobs
 
         private async Task SyncSegments( Dictionary<int, string> groupNamesByID, IQueryable<IGrouping<int, Person>> peopleByGroup, Dictionary<string, int> segments )
         {
-            foreach (var keyPair in groupNamesByID)
+            foreach ( var keyPair in groupNamesByID )
             {
                 String groupName = keyPair.Value;
                 IEnumerable<Person> people = peopleByGroup.Where( g => g.Key == keyPair.Key ).SelectMany( a => a.Select( b => b ) );
 
 
                 // update
-                if ( segments.Keys.Contains(groupName))
+                if ( segments.Keys.Contains( groupName ) )
                 {
                     try
                     {
 
                         await UpdateSegment( groupName, segments[groupName], people );
-                    } catch (Exception e)
+                    }
+                    catch ( Exception e )
                     {
                         throw new Exception( "Error updating segment", e );
                     }
@@ -133,7 +139,8 @@ namespace org.kcionline.MailchimpSync.Jobs
                     try
                     {
                         await AddSegment( groupName, people );
-                    } catch (Exception e)
+                    }
+                    catch ( Exception e )
                     {
                         throw new Exception( "Error adding segment " + groupName, e );
                     }
@@ -150,8 +157,8 @@ namespace org.kcionline.MailchimpSync.Jobs
             int count = 0;
             int recordTypeId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_RECORD_TYPE_PERSON.AsGuid() ).Id;
             int recordStatusId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_RECORD_STATUS_ACTIVE.AsGuid() ).Id;
-            int connectionStatusValueId = DefinedValueCache.Read( Rock.SystemGuid.DefinedValue.PERSON_CONNECTION_STATUS_WEB_PROSPECT.AsGuid() ).Id;
-            foreach ( Member listMember in listMembers )
+            int connectionStatusValueId = DefinedValueCache.Read( _newPersonConnectionStatusGuid ).Id;
+            foreach ( Member listMember in listMembers.Where(l => l.Status != Status.Undefined && l.Status != Status.Unsubscribed) )
             {
                 count++;
                 if ( count > 200 )
@@ -166,14 +173,12 @@ namespace org.kcionline.MailchimpSync.Jobs
                 // Get by unique ID if no personaliasid seen, else use personaliasid
                 mailChimpPersonAlias = ( ( !listMember.MergeFields.ContainsKey( PERSON_ALIAS_KEY ) || !listMember.MergeFields[PERSON_ALIAS_KEY].ToString().AsIntegerOrNull().HasValue ) ? mailChimpPersonAliasService.GetByMailChimpUniqueId( listMember.UniqueEmailId ) : mailChimpPersonAliasService.GetByPersonAliasId( listMember.MergeFields[PERSON_ALIAS_KEY].ToString().AsInteger() ) );
 
-                // TODO Some kind of check they're in the group (?)
-
 
                 if ( mailChimpPersonAlias == null )
                 {
                     // Can't find a match in our database, guess we better try and find or create a person
                     mailChimpPersonAlias = CreatePerson( rockContext, personService, recordTypeId, recordStatusId, connectionStatusValueId, listMember );
-                    if (_workflowTypeGuid.HasValue)
+                    if ( _workflowTypeGuid.HasValue )
                     {
                         LaunchWorkflow( mailChimpPersonAlias.PersonAlias.Person );
                     }
@@ -246,11 +251,11 @@ namespace org.kcionline.MailchimpSync.Jobs
             return mailChimpPersonAlias;
         }
 
-        private void SyncToMailChimp( HashSet<int> existingPersonAliasIds, IQueryable<IGrouping<int, Person>> peopleGroupedByGroupId  )
+        private void SyncToMailChimp( HashSet<int> existingPersonAliasIds, IQueryable<IGrouping<int, Person>> peopleGroupedByGroupId )
         {
             RockContext rockContext = GenerateRockContext();
             var validGroupMembers = peopleGroupedByGroupId
-                            .SelectMany(g => g.Select(p => p))
+                            .SelectMany( g => g.Select( p => p ) )
                             .ToList();
 
             var peopleNotOnList = validGroupMembers.Where( p => p.PrimaryAliasId.HasValue && !existingPersonAliasIds.Contains( p.PrimaryAliasId.Value ) );
@@ -290,12 +295,25 @@ namespace org.kcionline.MailchimpSync.Jobs
             {
                 throw new Exception( "No Group Type set. Unable to sync." );
             }
-            GroupTypeCache groupTypeCache = GroupTypeCache.Read( groupTypeGuid.Value, null );
-            if ( groupTypeCache == null )
+            
+
+            if ( _newPersonConnectionStatusGuid.IsEmpty())
+            {
+                throw new Exception( "New person connection status could not be found. Unable to sync." );
+            }
+            var connectionStatusCached = DefinedValueCache.Read( _newPersonConnectionStatusGuid );
+            if (connectionStatusCached == null)
+            {
+
+                throw new Exception( "New person connection status could not be found. Unable to sync." );
+            }
+
+            var groupTypeCached = GroupTypeCache.Read( groupTypeGuid.Value );
+            if ( groupTypeCached == null )
             {
                 throw new Exception( "Invalid group type set. Could not be found. Unable to sync" );
             }
-            return groupTypeCache.Id;
+            return groupTypeCached.Id;
         }
 
         private async Task<IEnumerable<Member>> GetListMembers()
@@ -313,7 +331,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                 if ( person.PrimaryAliasId.HasValue )
                 {
                     MailChimpPersonAlias mailChimpPersonAlias = mailChimpPersonAliasService.GetByPersonAliasId( person.PrimaryAliasId.Value );
-                    if ( mailChimpPersonAlias != null && mailChimpPersonAlias.LastUpdated >= RockDateTime.Now.AddMinutes(-5))
+                    if ( mailChimpPersonAlias != null && mailChimpPersonAlias.LastUpdated >= RockDateTime.Now.AddMinutes( -5 ) )
                     {
                         // Skip sync, synced recently
                         return mailChimpPersonAlias;
@@ -418,10 +436,8 @@ namespace org.kcionline.MailchimpSync.Jobs
             }
         }
 
-        private void LaunchWorkflow(Person person )
+        private void LaunchWorkflow( Person person )
         {
-            // don't launch a workflow if no adult is present in the family
-
             using ( var rockContext = new RockContext() )
             {
                 var workflowType = WorkflowTypeCache.Read( _workflowTypeGuid.Value );
@@ -443,7 +459,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             return await _manager.ListSegments.GetAllAsync( _listId, null ).ConfigureAwait( false );
         }
 
-        private async Task<ListSegment> AddSegment(String groupName, IEnumerable<Person> people)
+        private async Task<ListSegment> AddSegment( String groupName, IEnumerable<Person> people )
         {
             var segment = new MailChimp.Net.Core.Segment();
             segment.Name = groupName;
