@@ -2,6 +2,7 @@ using MailChimp.Net;
 using MailChimp.Net.Interfaces;
 using MailChimp.Net.Models;
 using org.kcionline.MailchimpSync.Model;
+using org.kcionline.bricksandmortarstudio.Extensions;
 using Quartz;
 using Rock;
 using Rock.Attribute;
@@ -366,7 +367,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             await _manager.Members.DeleteAsync( _listId, mailChimpPersonAlias.Email ).ConfigureAwait( false );
         }
 
-        private static Member MakeMailChimpMember( Person person )
+        private Member MakeMailChimpMember( Person person )
         {
             Dictionary<string, object> mergeFields = CreateMergeFields( person );
             return new Member
@@ -378,7 +379,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             };
         }
 
-        private static Dictionary<string, object> CreateMergeFields( Person person )
+        private Dictionary<string, object> CreateMergeFields( Person person )
         {
             Dictionary<string, object> mergeFields = new Dictionary<string, object>();
             mergeFields.Add( FIRST_NAME_KEY, person.NickName.ToStringSafe() );
@@ -386,16 +387,17 @@ namespace org.kcionline.MailchimpSync.Jobs
             mergeFields.Add( PERSON_ALIAS_KEY, person.PrimaryAliasId.ToStringSafe() );
             mergeFields.Add( AGE_KEY, person.Age.ToStringSafe() );
             mergeFields.Add( DATE_OF_BIRTH_KEY, person.BirthDate.HasValue ? person.BirthDate.Value.ToString( "yyyy-MM-dd" ) : String.Empty );
+            mergeFields.Add( "GENDER", person.Gender.ToStringSafe() );
             var address = person.GetFamily( null )?.GroupLocations?.FirstOrDefault( ( GroupLocation a ) => a.IsMailingLocation )?.Location;
-            mergeFields.Add( "STREET1", address?.Street1.ToStringSafe() );
-            mergeFields.Add( "STREET2", address?.Street2.ToStringSafe() );
             mergeFields.Add( "CITY", address?.City.ToStringSafe() );
-            mergeFields.Add( "POSTALCODE", address?.PostalCode.ToStringSafe() );
-            mergeFields.Add( "COUNTRY", address?.Country.ToStringSafe() );
+            
+            // TODO Use an existing Rock Context
+            var primaryGroup = person.GetPersonsPrimaryKciGroup( GenerateRockContext() );
+            var leaderFullName = primaryGroup?.Members.FirstOrDefault()?.Person;
+            var memberNames = primaryGroup?.Members.Select( m => m.Person.FullName );
 
-            //mergeFields.Add( "GROUPS", String.Join( ",", new GroupMemberService( new RockContext() ).GetByPersonId( person.Id ).Select( a => a.GroupId ).OrderBy( b => b ).Select( c => c.ToString() ).ToArray() ) );
-            // TODO
-            //mergeFields.Add( "LINE", string.Empty );
+            mergeFields.Add( "LEADER", leaderFullName.ToStringSafe());
+            mergeFields.Add( "MEMBERS", memberNames.ToStringSafe() );
             mergeFields.Add( MERGE_HASH_KEY, HashDictionary( mergeFields ) );
             return mergeFields;
         }
