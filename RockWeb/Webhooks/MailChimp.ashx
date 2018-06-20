@@ -49,6 +49,7 @@ public class MailChimp : IHttpHandler
             {
                 var mailChimpAliasService = new MailChimpPersonAliasService( rockContext );
                 var mailChimpAliasPerson = mailChimpAliasService.GetByPersonAliasId(personAliasId);
+				// TODO Check this should actually be deleted
                 if (mailChimpAliasPerson != null)
                 {
                     mailChimpAliasService.Delete( mailChimpAliasPerson );

@@ -54,9 +54,9 @@ namespace org.kcionline.MailchimpSync.Jobs
             _listId = jobDataMap.GetString( "ListId" );
             _timeout = jobDataMap.GetIntFromString( "Timeout" );
             _manager = new MailChimpManager( apiKey );
-            _groupTypeId = ValidateParameters( apiKey, groupTypeGuid );
             _workflowTypeGuid = jobDataMap.GetString( "NewPersonWorkflow" ).AsGuidOrNull();
             _newPersonConnectionStatusGuid = jobDataMap.GetString( "NewPersonConnectionStatus" ).AsGuid();
+            _groupTypeId = ValidateParameters( apiKey, groupTypeGuid );
 
             // Get segments
             IEnumerable<ListSegment> segments;
@@ -186,8 +186,8 @@ namespace org.kcionline.MailchimpSync.Jobs
                 }
                 else
                 {
-
-                    // Handle change of email address
+					// TODO HANDLE ROCK EMAIL PREFERENCE CHANGE
+                    // Handle change of email address from Rock side
                     var person = mailChimpPersonAlias.PersonAlias.Person;
                     if ( person.Email != mailChimpPersonAlias.Email )
                     {
@@ -201,6 +201,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                             _exceptions.Add( new Exception( "Failed to add or update person", e ) );
                         }
                     }
+					// TODO: Handle change of email address from MailChimp side
                     else
                     {
                         // Check to see if person has been updated
