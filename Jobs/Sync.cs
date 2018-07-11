@@ -7,7 +7,6 @@ using Rock.Attribute;
 using Rock.Data;
 using Rock.Model;
 using Rock.Web.Cache;
-using org.kcionline.MailchimpSync.Utils;
 using org.kcionline.MailchimpSync.API;
 using System;
 using System.Collections.Generic;
