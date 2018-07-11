@@ -1,4 +1,4 @@
-using API;
+
 using MailChimp.Net.Models;
 using org.kcionline.MailchimpSync.Model;
 using Quartz;
@@ -7,7 +7,8 @@ using Rock.Attribute;
 using Rock.Data;
 using Rock.Model;
 using Rock.Web.Cache;
-using Service;
+using org.kcionline.MailchimpSync.Utils;
+using org.kcionline.MailchimpSync.API;
 using System;
 using System.Collections.Generic;
 using System.Data.Entity;
@@ -80,7 +81,7 @@ namespace org.kcionline.MailchimpSync.Jobs
             var groups = new GroupService( rockContext )
                                 .Queryable( "Members.Select(l1 => l1.Person)" )
                                 .AsNoTracking()
-                                .Where( g => g.GroupTypeId == _groupTypeId );
+                                .Where( g => g.GroupTypeId == _groupTypeId && g.IsActive );
 
             var segmentIdsByName = segments.Select( s => new { s.Name, s.Id } ).ToDictionary( a => a.Name, s => s.Id );
             var groupNamesByID = groups.Select( g => new { g.Name, g.Id } ).ToDictionary( a => a.Id, g => g.Name );
@@ -102,7 +103,7 @@ namespace org.kcionline.MailchimpSync.Jobs
 
             if ( _exceptions.Any() )
             {
-                throw new AggregateException( "One or more person syncs failed ", _exceptions );
+                throw new AggregateException( "One or more syncs failed ", _exceptions );
             }
         }
 
@@ -111,34 +112,67 @@ namespace org.kcionline.MailchimpSync.Jobs
             foreach ( var keyPair in groupNamesByID )
             {
                 String groupName = keyPair.Value;
-                IEnumerable<Person> people = peopleByGroup.Where( g => g.Key == keyPair.Key ).SelectMany( a => a.Select( b => b ) );
-
-
+                int groupId = keyPair.Key;
+                // Name-Id
+                string newSegmentName = SegmentNameFromGroupandId( groupName, groupId );
+                IEnumerable<Person> people = peopleByGroup
+                    .Where( g => g.Key == groupId )
+                    .SelectMany( a => a.Select( b => b ) );
+                
+                string existingSegmentName = segments.Keys.FirstOrDefault( g => g.Contains('-') && GroupIdFromSegmentName( g ) == groupId );
                 // update
-                if ( segments.Keys.Contains( groupName ) )
+                if ( existingSegmentName.IsNotNullOrWhitespace() )
                 {
+                    // This will also rename the segment if need be
                     try
                     {
 
-                        await _api.UpdateSegment( groupName, segments[groupName], people );
+                        await _api.UpdateSegment( newSegmentName, segments[existingSegmentName], people );
                     }
+
                     catch ( Exception e )
                     {
-                        throw new Exception( "Error updating segment", e );
+                        _exceptions.Add( new Exception( "Error updating segment", e ) );
+                        continue;
                     }
                 }
-                else //create
+
+                // Segment doesn't exist so create it 
+                try
                 {
-                    try
-                    {
-                        await _api.AddSegment( groupName, people );
-                    }
-                    catch ( Exception e )
-                    {
-                        throw new Exception( "Error adding segment " + groupName, e );
-                    }
+                    await _api.AddSegment( newSegmentName, people );
+                }
+                catch ( Exception e )
+                {
+                    _exceptions.Add( new Exception( "Error adding segment " + existingSegmentName, e ) );
                 }
             }
+
+            // Clean up any old segments (i.e. not formatted correctly or groups is deleted)
+            var groupIds = new HashSet<int>( groupNamesByID.Keys );
+            var segmentsToDelete = segments.Keys.Where( s => !s.Contains( '-' ) || !groupIds.Contains( GroupIdFromSegmentName( s ) ) ).Select(s => segments[s]);
+            foreach (var segmentId in segmentsToDelete)
+            {
+                try
+                {
+                    await _api.DeleteSegment( segmentId );
+                }
+                catch ( Exception e )
+                {
+                    _exceptions.Add( new Exception( "Error removing segment " + segmentId, e ) );
+                }
+            }
+        }
+
+        private static string SegmentNameFromGroupandId( string groupName, int groupId )
+        {
+            return string.Format( "{0}-{1}", groupName, groupId );
+        }
+
+        private static int GroupIdFromSegmentName( string newSegmentName )
+        {
+            var lastIndex = newSegmentName.LastIndexOf( '-' );
+            return newSegmentName.Substring( lastIndex + 1).AsInteger();
         }
 
         private HashSet<int> SyncFromMailChimp( IEnumerable<Member> listMembers )
@@ -166,14 +200,19 @@ namespace org.kcionline.MailchimpSync.Jobs
                 // Get by unique ID if no personaliasid seen, else use personaliasid
                 mailChimpPersonAlias = ( ( !listMember.MergeFields.ContainsKey( Utils.PERSON_ALIAS_KEY ) || !listMember.MergeFields[Utils.PERSON_ALIAS_KEY].ToString().AsIntegerOrNull().HasValue ) ? mailChimpPersonAliasService.GetByMailChimpUniqueId( listMember.UniqueEmailId ) : mailChimpPersonAliasService.GetByPersonAliasId( listMember.MergeFields[Utils.PERSON_ALIAS_KEY].ToString().AsInteger() ) );
 
-
-                if ( mailChimpPersonAlias == null )
+                if ( mailChimpPersonAlias == null)
                 {
+
                     // Can't find a match in our database, guess we better try and find or create a person
-                    mailChimpPersonAlias = CreatePerson( rockContext, personService, recordTypeId, recordStatusId, connectionStatusValueId, listMember );
                     if ( _workflowTypeGuid.HasValue )
                     {
-                        LaunchWorkflow( mailChimpPersonAlias.PersonAlias.Person );
+                        // defer to workflow
+                        LaunchWorkflow( listMember.MergeFields[Utils.FIRST_NAME_KEY].ToString(), listMember.MergeFields[Utils.LAST_NAME_KEY].ToString(), listMember.EmailAddress);
+                    }
+                    else
+                    {
+                        // do it ourselves
+                        mailChimpPersonAlias = CreatePerson( rockContext, personService, recordTypeId, recordStatusId, connectionStatusValueId, listMember );
                     }
                 }
                 else
@@ -268,7 +307,7 @@ namespace org.kcionline.MailchimpSync.Jobs
                 }
                 catch ( Exception e )
                 {
-                    _exceptions.Add( new Exception( "Failed to add or update person", e ) );
+                    _exceptions.Add( new Exception( string.Format("Failed to add or update person {0}", person.FullName), e ) );
                 }
             }
         }
@@ -324,11 +363,31 @@ namespace org.kcionline.MailchimpSync.Jobs
                 if ( workflowType != null && ( workflowType.IsActive ?? true ) )
                 {
                     var workflowService = new WorkflowService( rockContext );
-                    var workflow = Workflow.Activate( workflowType, person.FullName, rockContext );
+                    var workflow = Rock.Model.Workflow.Activate( workflowType, person.FullName, rockContext );
                     workflowService.Add( workflow );
                     rockContext.SaveChanges();
 
                     workflow.SetAttributeValue( "Person", person.Guid );
+                    workflow.SaveAttributeValues();
+                }
+            }
+        }
+
+        private void LaunchWorkflow( String firstName, String lastName, String email)
+        {
+            using ( var rockContext = new RockContext() )
+            {
+                var workflowType = WorkflowTypeCache.Read( _workflowTypeGuid.Value );
+                if ( workflowType != null && ( workflowType.IsActive ?? true ) )
+                {
+                    var workflowService = new WorkflowService( rockContext );
+                    var workflow = Rock.Model.Workflow.Activate( workflowType, string.Format("{0} {1}", firstName, lastName), rockContext );
+                    workflowService.Add( workflow );
+                    rockContext.SaveChanges();
+
+                    workflow.SetAttributeValue( "FirstName", firstName);
+                    workflow.SetAttributeValue( "LastName", lastName);
+                    workflow.SetAttributeValue( "Email", email);
                     workflow.SaveAttributeValues();
                 }
             }

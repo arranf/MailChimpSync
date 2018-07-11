@@ -9,7 +9,7 @@ using MailChimp.Net.Models;
 using org.kcionline.MailchimpSync.Model;
 using Rock.Model;
 
-namespace API
+namespace org.kcionline.MailchimpSync.API
 {
     public class MailChimpApi
     {
@@ -39,20 +39,25 @@ namespace API
             return await _manager.ListSegments.GetAllAsync( _listId, null ).ConfigureAwait( false );
         }
 
-        public async Task<ListSegment> AddSegment( String groupName, IEnumerable<Person> people )
+        public async Task<ListSegment> AddSegment( String segmentName, IEnumerable<Person> people )
         {
             var segment = new Segment();
-            segment.Name = groupName;
+            segment.Name = segmentName;
             segment.EmailAddresses = people.Select( p => p.Email );
             return await _manager.ListSegments.AddAsync( _listId, segment );
         }
 
-        public async Task<ListSegment> UpdateSegment( String groupName, int segmentId, IEnumerable<Person> people )
+        public async Task<ListSegment> UpdateSegment( String segmentName, int segmentId, IEnumerable<Person> people )
         {
             var segment = new Segment();
-            segment.Name = groupName;
+            segment.Name = segmentName;
             segment.EmailAddresses = people.Select( p => p.Email );
             return await _manager.ListSegments.UpdateAsync( _listId, segmentId.ToString(), segment );
+        }
+
+        public async Task DeleteSegment(int segmentId)
+        {
+            await _manager.ListSegments.DeleteAsync( _listId, segmentId.ToString() );
         }
 
         public async Task<Member> AddOrUpdateMailChimpMember( Member member )

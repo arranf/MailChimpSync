@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using API;
 using MailChimp.Net.Models;
 using org.kcionline.bricksandmortarstudio.Extensions;
 using org.kcionline.MailchimpSync.Model;
+using org.kcionline.MailchimpSync.API;
 using Rock;
 using Rock.Data;
 using Rock.Model;
 
-namespace Service
+namespace org.kcionline.MailchimpSync
 {
     public class Utils
     {
@@ -26,7 +26,7 @@ namespace Service
         public const string LEADER_KEY = "LEADER";
         public const string MEMBERS_KEY = "MEMBERS";
 
-        public static bool IsSyncNeeded(Person person, MailChimp.Net.Models.Member listMember)
+        public static bool IsSyncNeeded(Person person, Member listMember )
         {
             var mergeFields = CreateMergeFields( person );
             string mergeFieldsHash = HashDictionary( mergeFields );
@@ -70,6 +70,13 @@ namespace Service
             {
                 throw new Exception( "Error adding or updating a person", e );
             }
+        }
+
+        public static MailChimpPersonAlias AddOrUpdatePerson( Person person, string listId, string apiKey )
+        {
+            var rockContext = new RockContext();
+            var api = new MailChimpApi( apiKey, listId );
+            return AddOrUpdatePerson( api, person, rockContext );
         }
 
         public static Member MakeMailChimpMember( Person person )
